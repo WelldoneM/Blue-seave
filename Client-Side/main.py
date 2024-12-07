@@ -145,7 +145,6 @@ def log_in(baseurl):
     except Exception as e:
         logging.error(f"Error in log_in: {str(e)}")
 
-
 def fetch_user_data(baseurl, token):
     try:
         print("\nFetching user data...")
@@ -203,26 +202,30 @@ def fetch_user_data(baseurl, token):
 
 def fetch_alerts(baseurl, token):
     """
-    Fetch budget alerts from the /exceed-budget endpoint.
+    Fetch budget alerts from the /retrieve-notifications endpoint.
     """
     try:
         print("\nLoading notifications...")  # Cleaner user experience
-        url = f"{baseurl}/exceed-budget?token={token}"
+        url = f"{baseurl}/notifications?token={token}"  # Correct endpoint
         response = web_service_get(url)
 
-        if response.status_code == 200:
-            # Debugging print statement for full response (optional, can be removed)
+        if response and response.status_code == 200:
+            # Debugging print statement for full response (optional)
             logging.info(f"Full Response: {response.json()}")
 
-            data = response.json()["body"]
+            data = response.json().get("body", [])
+
+            # Check if data is empty
+            if not data:
+                print("\nNo notifications available.")  # Message for no alerts
+                return
+
             print("\nNotifications:")
             for item in data:
-                # Dynamically create a message from the returned fields
-                category = item.get("Category", "Unknown Category")
-                budget = item.get("Budget", 0)
-                spent = item.get("Spent", 0)
-                message = f"You exceeded your budget for {category}. Budget: {budget}, Spent: {spent}."
-                print(f"- {message}")
+                # Extract and display message and timestamp
+                message = item.get("Message", "No message provided.")
+                created_at = item.get("CreatedAt", "Unknown timestamp")
+                print(f"- {message} (Created at: {created_at})")
         else:
             print(f"Error: {response.status_code}, {response.json()}")
     except Exception as e:
