@@ -1,648 +1,278 @@
-#
-# Client-side python app for benford app, which is calling
-# a set of lambda functions in AWS through API Gateway.
-# The overall purpose of the app is to process a PDF and
-# see if the numeric values in the PDF adhere to Benford's
-# law.
-#
-# Authors:
-#   << YOUR NAME >>
-#
-#   Prof. Joe Hummel (initial template)
-#   Northwestern University
-#   CS 310
-#
-
 import requests
-import jsons
-
-import uuid
-import pathlib
 import logging
 import sys
-import os
-import base64
-import time
-
+import pathlib
+import json
 from configparser import ConfigParser
-
+import matplotlib.pyplot as plt
 
 ############################################################
-#
-# classes
-#
-class User:
+# Helper Functions
+############################################################
 
-  def __init__(self, row):
-    self.userid = row[0]
-    self.username = row[1]
-    self.pwdhash = row[2]
+def web_service_post(url, payload):
+    try:
+        response = requests.post(url, json=payload)
+        if response.status_code in [200, 400, 401, 500]:
+            return response
+        else:
+            return None
+    except Exception as e:
+        logging.error(f"Error in web_service_post: {str(e)}")
+        return None
 
-
-class Job:
-
-  def __init__(self, row):
-    self.jobid = row[0]
-    self.userid = row[1]
-    self.status = row[2]
-    self.originaldatafile = row[3]
-    self.datafilekey = row[4]
-    self.resultsfilekey = row[5]
-
-
-###################################################################
-#
-# web_service_get
-#
-# When calling servers on a network, calls can randomly fail. 
-# The better approach is to repeat at least N times (typically 
-# N=3), and then give up after N tries.
-#
+# def web_service_get(url):
+#     try:
+#         response = requests.get(url)
+#         if response.status_code in [200, 400, 401, 500]:
+#             return response
+#         else:
+#             return None
+#     except Exception as e:
+#         logging.error(f"Error in web_service_get: {str(e)}")
+#         return None
 def web_service_get(url):
-  """
-  Submits a GET request to a web service at most 3 times, since 
-  web services can fail to respond e.g. to heavy user or internet 
-  traffic. If the web service responds with status code 200, 400 
-  or 500, we consider this a valid response and return the response.
-  Otherwise we try again, at most 3 times. After 3 attempts the 
-  function returns with the last response.
-  
-  Parameters
-  ----------
-  url: url for calling the web service
-  
-  Returns
-  -------
-  response received from web service
-  """
+    try:
+        response = requests.get(url)
+        return response
+    except Exception as e:
+        logging.error(f"Error in web_service_get: {str(e)}")
+        return None
+def visualize_and_save_user_data(data, filename='budget_vs_spending.png'):
+    categories = [item["CategoryName"] for item in data]
+    spent = [item["TotalAmount"] for item in data]
+    budget = [item["BudgetAmount"] for item in data]
 
-  try:
-    retries = 0
-    
-    while True:
-      response = requests.get(url)
-        
-      if response.status_code in [200, 400, 480, 481, 482, 500]:
-        #
-        # we consider this a successful call and response
-        #
-        break;
+    x = range(len(categories))  # the label locations
 
-      #
-      # failed, try again?
-      #
-      retries = retries + 1
-      if retries < 3:
-        # try at most 3 times
-        time.sleep(retries)
-        continue
-          
-      #
-      # if get here, we tried 3 times, we give up:
-      #
-      break
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.bar(x, budget, width=0.4, label='Budget', align='center')
+    ax.bar(x, spent, width=0.4, label='Spent', align='edge')
 
-    return response
+    ax.set_xlabel('Category')
+    ax.set_ylabel('Amount')
+    ax.set_title('Budget vs. Actual Spending by Category')
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories, rotation=45, ha='right')
+    ax.legend()
 
-  except Exception as e:
-    print("**ERROR**")
-    logging.error("web_service_get() failed:")
-    logging.error("url: " + url)
-    logging.error(e)
-    return None
-    
+    plt.tight_layout()
+    plt.savefig(filename, dpi=300)
+    plt.close()
 
-############################################################
-#
-# prompt
-#
+
+
 def prompt():
-  """
-  Prompts the user and returns the command number
-
-  Parameters
-  ----------
-  None
-
-  Returns
-  -------
-  Command number entered by user (0, 1, 2, ...)
-  """
-  try:
-    print()
-    print(">> Enter a command:")
-    print("   0 => end")
-    print("   1 => users")
-    print("   2 => jobs")
-    print("   3 => reset database")
-    print("   4 => upload pdf")
-    print("   5 => download results")
-
-    cmd = input()
-
-    if cmd == "":
-      cmd = -1
-    elif not cmd.isnumeric():
-      cmd = -1
-    else:
-      cmd = int(cmd)
-
-    return cmd
-
-  except Exception as e:
-    print("**ERROR")
-    print("**ERROR: invalid input")
-    print("**ERROR")
-    return -1
-
+    print("\n>> Choose a command:")
+    print("   0 => Exit")
+    print("   1 => Sign Up")
+    print("   2 => Log In")
+    print("   3 => Fetch User Data")
+    print("   4 => Fetch Alerts")
+    return input("Enter your choice: ").strip()
 
 ############################################################
-#
-# users
-#
-def users(baseurl):
-  """
-  Prints out all the users in the database
+# Command Functions
+############################################################
 
-  Parameters
-  ----------
-  baseurl: baseurl for web service
+def sign_up(baseurl):
+    try:
+        print("Enter your username: ")
+        username = input().strip()
+        print("Enter your email: ")
+        email = input().strip()  # Add email field
+        print("Enter your password: ")
+        password = input().strip()
 
-  Returns
-  -------
-  nothing
-  """
+        payload = {
+            "username": username,
+            "email": email,  # Include email
+            "password": password
+        }
 
-  try:
-    #
-    # call the web service:
-    #
-    api = '/users'
-    url = baseurl + api
+        url = f"{baseurl}/signup"
+        print("Signing up...")
 
-    # res = requests.get(url)
-    res = web_service_get(url)
+        # Send request
+        response = web_service_post(url, payload)
 
-    #
-    # let's look at what we got back:
-    #
-    if res.status_code == 200: #success
-      pass
-    else:
-      # failed:
-      print("Failed with status code:", res.status_code)
-      print("url: " + url)
-      if res.status_code == 500:
-        # we'll have an error message
-        body = res.json()
-        print("Error message:", body)
-      #
-      return
+        if response:
+            print(f"Response Status: {response.status_code}")
+            print(f"Response Body: {response.json()}")  # Log response
+        else:
+            print("\nFailed to contact server. Please try again.")
 
-    #
-    # deserialize and extract users:
-    #
-    body = res.json()
+        # Handle response
+        if response and response.status_code == 200:
+            print("\nSign-up successful! Please log in to continue.")
+        else:
+            print(f"\nSign-up failed: {response.json()}")
+    except Exception as e:
+        logging.error(f"Error in sign_up: {str(e)}")
 
-    #
-    # let's map each row into a User object:
-    #
-    users = []
-    for row in body:
-      user = User(row)
-      users.append(user)
-    #
-    # Now we can think OOP:
-    #
-    if len(users) == 0:
-      print("no users...")
-      return
 
-    for user in users:
-      print(user.userid)
-      print(" ", user.username)
-      print(" ", user.pwdhash)
-    #
-    return
+def log_in(baseurl):
+    global current_token
+    try:
+        print("\nLogging in...")  # Cleaner message
+        username = input("Enter your username: ").strip()
+        password = input("Enter your password: ").strip()
 
-  except Exception as e:
-    logging.error("**ERROR: users() failed:")
-    logging.error("url: " + url)
-    logging.error(e)
-    return
+        payload = {
+            "username": username,
+            "password": password
+        }
 
+        url = f"{baseurl}/login"
+        response = web_service_post(url, payload)
+        if response and response.status_code == 200:
+            data = response.json()
+            current_token = data["token"]  # Save token in memory
+            print("\nLog-in successful! Your session token has been stored.")
+
+            # Save to user-specific config file
+            config_file = f"blueseave-{username}-config.ini"
+            config = ConfigParser()
+            config["client"] = {
+                "webservice": baseurl,
+                "token": current_token
+            }
+            with open(config_file, "w") as configfile:
+                config.write(configfile)
+                print(f"Token saved to {config_file}")
+        else:
+            print(f"\nLog-in failed: {response.json()}")
+    except Exception as e:
+        logging.error(f"Error in log_in: {str(e)}")
+
+
+def fetch_user_data(baseurl, token):
+    try:
+        print("\nFetching user data...")
+        url = f"{baseurl}/fetch-user-data?token={token}"
+        response = requests.get(url)  # Assuming web_service_get is similar to requests.get
+        print("Response: ", response)
+
+        if response is None:
+            print("Error: Failed to fetch user data. Please check your internet connection or try again later.")
+            return
+
+        print(f"Response Status Code: {response.status_code}")
+        print(f"Response Text: {response.text}")
+
+        if response.status_code == 200:
+            # Parse the JSON response
+            response_data = response.json()
+
+            # Check if 'message' key exists indicating no data
+            
+            # Proceed with data processing
+            data = response_data.get("body", "[]")
+            data = json.loads(data) if isinstance(data, str) else data
+
+            if 'message' in data and data['message'] == "No data available for this user.":
+                print(data['message'])
+                return
+
+            print("Data: ", data)
+
+            if not data:
+                print("No data available for this user.")
+                return
+
+            print("\nUser Data:")
+            for item in data:
+                category = item.get("CategoryName", "Unknown")
+                total_amount = item.get("TotalAmount", 0)
+                budget = item.get("BudgetAmount", 0)
+                print(f"- {category}: Spent {total_amount}, Budget {budget}")
+
+            # Call visualization function if data is present
+            visualize_and_save_user_data(data)
+        else:
+            print(f"Error: {response.status_code}")
+            if response.headers.get("Content-Type") == "application/json":
+                print(response.json())
+    except json.JSONDecodeError:
+        logging.error("Error decoding JSON response.")
+    except requests.RequestException as e:
+        logging.error(f"Request error: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error in fetch_user_data: {str(e)}")
+
+
+def fetch_alerts(baseurl, token):
+    """
+    Fetch budget alerts from the /exceed-budget endpoint.
+    """
+    try:
+        print("\nLoading notifications...")  # Cleaner user experience
+        url = f"{baseurl}/exceed-budget?token={token}"
+        response = web_service_get(url)
+
+        if response.status_code == 200:
+            # Debugging print statement for full response (optional, can be removed)
+            logging.info(f"Full Response: {response.json()}")
+
+            data = response.json()["body"]
+            print("\nNotifications:")
+            for item in data:
+                # Dynamically create a message from the returned fields
+                category = item.get("Category", "Unknown Category")
+                budget = item.get("Budget", 0)
+                spent = item.get("Spent", 0)
+                message = f"You exceeded your budget for {category}. Budget: {budget}, Spent: {spent}."
+                print(f"- {message}")
+        else:
+            print(f"Error: {response.status_code}, {response.json()}")
+    except Exception as e:
+        logging.error(f"Error in fetch_alerts: {str(e)}")
 
 ############################################################
-#
-# jobs
-#
-def jobs(baseurl):
-  """
-  Prints out all the jobs in the database
-
-  Parameters
-  ----------
-  baseurl: baseurl for web service
-
-  Returns
-  -------
-  nothing
-  """
-
-  try:
-    #
-    # call the web service:
-    #
-    api = '/jobs'
-    url = baseurl + api
-
-    # res = requests.get(url)
-    res = web_service_get(url)
-
-    #
-    # let's look at what we got back:
-    #
-    if res.status_code == 200: #success
-      pass
-    else:
-      # failed:
-      print("Failed with status code:", res.status_code)
-      print("url: " + url)
-      if res.status_code == 500:
-        # we'll have an error message
-        body = res.json()
-        print("Error message:", body)
-      #
-      return
-
-    #
-    # deserialize and extract jobs:
-    #
-    body = res.json()
-    #
-    # let's map each row into an Job object:
-    #
-    jobs = []
-    for row in body:
-      job = Job(row)
-      jobs.append(job)
-    #
-    # Now we can think OOP:
-    #
-    if len(jobs) == 0:
-      print("no jobs...")
-      return
-
-    for job in jobs:
-      print(job.jobid)
-      print(" ", job.userid)
-      print(" ", job.status)
-      print(" ", job.originaldatafile)
-      print(" ", job.datafilekey)
-      print(" ", job.resultsfilekey)
-    #
-    return
-
-  except Exception as e:
-    logging.error("**ERROR: jobs() failed:")
-    logging.error("url: " + url)
-    logging.error(e)
-    return
-
-
+# Main Function
 ############################################################
-#
-# reset
-#
-def reset(baseurl):
-  """
-  Resets the database back to initial state.
 
-  Parameters
-  ----------
-  baseurl: baseurl for web service
+def main():
+    global current_token
+    current_token = None  # Token stored in memory during the session
+    try:
+        print("** Welcome to Budget Tracker Client **")
+        config_file = 'blueseave-app-client-config.ini'
 
-  Returns
-  -------
-  nothing
-  """
+        # Load configuration
+        if not pathlib.Path(config_file).is_file():
+            print("No config file found. Please sign up or log in.")
+            baseurl = input("Enter the base URL for your API: ").strip()
+        else:
+            configur = ConfigParser()
+            configur.read(config_file)
+            baseurl = configur.get('client', 'webservice')
 
-  try:
-    #
-    # call the web service:
-    #
-    api = '/reset'
-    url = baseurl + api
-
-    res = requests.delete(url)
-
-    #
-    # let's look at what we got back:
-    #
-    if res.status_code == 200: #success
-      pass
-    else:
-      # failed:
-      print("Failed with status code:", res.status_code)
-      print("url: " + url)
-      if res.status_code == 500:
-        # we'll have an error message
-        body = res.json()
-        print("Error message:", body)
-      #
-      return
-
-    #
-    # deserialize and print message
-    #
-    body = res.json()
-
-    msg = body
-
-    print(msg)
-    return
-
-  except Exception as e:
-    logging.error("**ERROR: reset() failed:")
-    logging.error("url: " + url)
-    logging.error(e)
-    return
-
-
-############################################################
-#
-# upload
-#
-def upload(baseurl):
-  """
-  Prompts the user for a local filename and user id, 
-  and uploads that asset (PDF) to S3 for processing. 
-
-  Parameters
-  ----------
-  baseurl: baseurl for web service
-
-  Returns
-  -------
-  nothing
-  """
-
-  try:
-    print("Enter PDF filename>")
-    local_filename = input()
-
-    if not pathlib.Path(local_filename).is_file():
-      print("PDF file '", local_filename, "' does not exist...")
-      return
-
-    print("Enter user id>")
-    userid = input()
-
-    #
-    # build the data packet. First step is read the PDF
-    # as raw bytes:
-    #
-    infile = open(local_filename, "rb")
-    bytes = infile.read()
-    infile.close()
-
-    #
-    # now encode the pdf as base64. Note b64encode returns
-    # a bytes object, not a string. So then we have to convert
-    # (decode) the bytes -> string, and then we can serialize
-    # the string as JSON for upload to server:
-    #
-    
-    datastr = ""
-    
-    # TODO: data = ???
-    # TODO: datastr = ???
-
-    data = {"filename": local_filename, "data": datastr}
-
-    #
-    # call the web service:
-    #
-    
-    res = None
-    
-    # TODO: ???
-
-    #
-    # let's look at what we got back:
-    #
-    if res.status_code == 200: #success
-      pass
-    elif res.status_code == 400: # no such user
-      body = res.json()
-      print(body)
-      return
-    else:
-      # failed:
-      print("Failed with status code:", res.status_code)
-      print("url: " + url)
-      if res.status_code == 500:
-        # we'll have an error message
-        body = res.json()
-        print("Error message:", body)
-      #
-      return
-
-    #
-    # success, extract jobid:
-    #
-    body = res.json()
-
-    jobid = body
-
-    print("PDF uploaded, job id =", jobid)
-    return
-
-  except Exception as e:
-    logging.error("**ERROR: upload() failed:")
-    logging.error("url: " + url)
-    logging.error(e)
-    return
-
-
-############################################################
-#
-# download
-#
-def download(baseurl):
-  """
-  Prompts the user for the job id, and downloads
-  that asset (PDF).
-
-  Parameters
-  ----------
-  baseurl: baseurl for web service
-
-  Returns
-  -------
-  nothing
-  """
-  
-  try:
-    print("Enter job id>")
-    jobid = input()
-    
-    #
-    # call the web service:
-    #
-
-    res = None
-    
-    # TODO ???
-
-    #
-    # let's look at what we got back:
-    #
-    if res.status_code == 200: #success
-      pass
-    elif res.status_code == 400: # no such job
-      body = res.json()
-      print(body)
-      return
-    elif res.status_code in [480, 481, 482]:  # uploaded
-      msg = res.json()
-      print("No results available yet...")
-      print("Job status:", msg)
-      return
-    else:
-      # failed:
-      print("Failed with status code:", res.status_code)
-      print("url: " + url)
-      if res.status_code == 500:
-        # we'll have an error message
-        body = res.json()
-        print("Error message:", body)
-      #
-      return
-      
-    #
-    # if we get here, status code was 200, so we
-    # have results to deserialize and display:
-    #
-    
-    body = ""
-    
-    # deserialize the message body:
-    # TODO: body = ???
-
-    datastr = body
-
-    #
-    # encode the data string to obtain the raw bytes in base64,
-    # then call b64decode to obtain the original raw bytes.
-    # Finally, decode() the bytes to obtain the results as a 
-    # printable string.
-    #
-    
-    results = ""
-    
-    # TODO: base64_bytes = ???
-    # TODO: bytes = ???
-    # TODO: results = ???
-
-    print(results)
-    return
-
-  except Exception as e:
-    logging.error("**ERROR: download() failed:")
-    logging.error("url: " + url)
-    logging.error(e)
-    return
-
-
-############################################################
-# main
-#
-try:
-  print('** Welcome to BenfordApp **')
-  print()
-
-  # eliminate traceback so we just get error message:
-  sys.tracebacklimit = 0
-
-  #
-  # what config file should we use for this session?
-  #
-  config_file = 'benfordapp-client-config.ini'
-
-  print("Config file to use for this session?")
-  print("Press ENTER to use default, or")
-  print("enter config file name>")
-  s = input()
-
-  if s == "":  # use default
-    pass  # already set
-  else:
-    config_file = s
-
-  #
-  # does config file exist?
-  #
-  if not pathlib.Path(config_file).is_file():
-    print("**ERROR: config file '", config_file, "' does not exist, exiting")
-    sys.exit(0)
-
-  #
-  # setup base URL to web service:
-  #
-  configur = ConfigParser()
-  configur.read(config_file)
-  baseurl = configur.get('client', 'webservice')
-
-  #
-  # make sure baseurl does not end with /, if so remove:
-  #
-  if len(baseurl) < 16:
-    print("**ERROR: baseurl '", baseurl, "' is not nearly long enough...")
-    sys.exit(0)
-
-  if baseurl == "https://YOUR_GATEWAY_API.amazonaws.com":
-    print("**ERROR: update config file with your gateway endpoint")
-    sys.exit(0)
-
-  if baseurl.startswith("http:"):
-    print("**ERROR: your URL starts with 'http', it should start with 'https'")
-    sys.exit(0)
-
-  lastchar = baseurl[len(baseurl) - 1]
-  if lastchar == "/":
-    baseurl = baseurl[:-1]
-
-  #
-  # main processing loop:
-  #
-  cmd = prompt()
-
-  while cmd != 0:
-    #
-    if cmd == 1:
-      users(baseurl)
-    elif cmd == 2:
-      jobs(baseurl)
-    elif cmd == 3:
-      reset(baseurl)
-    elif cmd == 4:
-      upload(baseurl)
-    elif cmd == 5:
-      download(baseurl)
-    else:
-      print("** Unknown command, try again...")
-    #
-    cmd = prompt()
-
-  #
-  # done
-  #
-  print()
-  print('** done **')
-  sys.exit(0)
-
-except Exception as e:
-  logging.error("**ERROR: main() failed:")
-  logging.error(e)
-  sys.exit(0)
+        # Main loop
+        while True:
+            cmd = prompt()
+            if cmd == "0":
+                print("\nExiting Budget Tracker Client. Goodbye!")
+                break
+            elif cmd == "1":
+                sign_up(baseurl)
+            elif cmd == "2":
+                log_in(baseurl)
+            elif cmd == "3":
+                if not current_token:
+                    print("You must log in first!")
+                else:
+                    fetch_user_data(baseurl, current_token)
+            elif cmd == "4":
+                if not current_token:
+                    print("You must log in first!")
+                else:
+                    fetch_alerts(baseurl, current_token)
+            else:
+                print("\n** Invalid command, please try again.")
+    except Exception as e:
+        logging.error(f"Error in main: {str(e)}")
+        sys.exit(0)
+if __name__ == "__main__":
+    main()
+ 
