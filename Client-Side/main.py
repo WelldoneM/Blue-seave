@@ -38,7 +38,14 @@ def web_service_get(url):
     except Exception as e:
         logging.error(f"Error in web_service_get: {str(e)}")
         return None
+
+
 def visualize_and_save_user_data(data, filename='budget_vs_spending.png'):
+    # Replace None values in 'BudgetAmount' with 0
+    for item in data:
+        if item.get("BudgetAmount") is None:
+            item["BudgetAmount"] = 0
+
     categories = [item["CategoryName"] for item in data]
     spent = [item["TotalAmount"] for item in data]
     budget = [item["BudgetAmount"] for item in data]
@@ -149,7 +156,7 @@ def fetch_user_data(baseurl, token):
     try:
         print("\nFetching user data...")
         url = f"{baseurl}/fetch-user-data?token={token}"
-        response = requests.get(url)  # Assuming web_service_get is similar to requests.get
+        response = requests.get(url)
         print("Response: ", response)
 
         if response is None:
@@ -161,20 +168,9 @@ def fetch_user_data(baseurl, token):
 
         if response.status_code == 200:
             # Parse the JSON response
-            response_data = response.json()
+            data = response.json()
 
-            # Check if 'message' key exists indicating no data
-            
-            # Proceed with data processing
-            data = response_data.get("body", "[]")
-            data = json.loads(data) if isinstance(data, str) else data
-
-            if 'message' in data and data['message'] == "No data available for this user.":
-                print(data['message'])
-                return
-
-            print("Data: ", data)
-
+            # Check if data is empty
             if not data:
                 print("No data available for this user.")
                 return
