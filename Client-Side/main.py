@@ -21,6 +21,8 @@ def web_service_post(url, payload):
         logging.error(f"Error in web_service_post: {str(e)}")
         return None
 
+
+#
 # def web_service_get(url):
 #     try:
 #         response = requests.get(url)
@@ -69,6 +71,7 @@ def prompt():
     print("   2 => Log In")
     print("   3 => Fetch User Data")
     print("   4 => Fetch Alerts")
+    print("   5 => Add Expense")
     return input("Enter your choice: ").strip()
 
 ############################################################
@@ -231,6 +234,35 @@ def fetch_alerts(baseurl, token):
     except Exception as e:
         logging.error(f"Error in fetch_alerts: {str(e)}")
 
+def add_expense(baseurl, token):
+    print("\n>> Add a New Expense")
+    description = input("Enter the description of the expense: ").strip()
+    amount = input("Enter the amount of the expense: ").strip()
+
+    # Construct the URL with query parameters directly
+    url = f"{baseurl}/new-expense?token={token}&description={description}&amount={amount}"
+
+    # Send the POST request with an empty payload
+    response = web_service_post(url, {})
+
+    if response and response.status_code == 200:
+        data = response.json()
+        print("\nExpense added successfully!")
+        print(f"Category: {data.get('category')}")
+    else:
+        error_message = "Failed to add expense."
+        if response:
+            try:
+                error_details = response.json().get('error', 'No error message provided')
+                error_message += f" Status Code: {response.status_code}, Error: {error_details}"
+            except json.JSONDecodeError:
+                error_message += " Error: Failed to decode the error message."
+        else:
+            error_message += " No response from server."
+        
+        print(error_message)
+
+
 ############################################################
 # Main Function
 ############################################################
@@ -271,6 +303,12 @@ def main():
                     print("You must log in first!")
                 else:
                     fetch_alerts(baseurl, current_token)
+
+            elif cmd == "5":
+                 if not current_token:
+                    print("You must log in first!")
+                 else:
+                    add_expense(baseurl, current_token)
             else:
                 print("\n** Invalid command, please try again.")
     except Exception as e:
