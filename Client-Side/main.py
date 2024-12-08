@@ -88,7 +88,7 @@ def sign_up(baseurl):
             "password": password
         }
 
-        url = f"{baseurl}/signup"
+        url = f"{baseurl}/sign-up"
         print("Signing up...")
 
         # Send request
