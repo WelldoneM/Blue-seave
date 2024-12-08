@@ -21,18 +21,6 @@ def web_service_post(url, payload):
         logging.error(f"Error in web_service_post: {str(e)}")
         return None
 
-
-#
-# def web_service_get(url):
-#     try:
-#         response = requests.get(url)
-#         if response.status_code in [200, 400, 401, 500]:
-#             return response
-#         else:
-#             return None
-#     except Exception as e:
-#         logging.error(f"Error in web_service_get: {str(e)}")
-#         return None
 def web_service_get(url):
     try:
         response = requests.get(url)
@@ -160,20 +148,21 @@ def fetch_user_data(baseurl, token):
         print("\nFetching user data...")
         url = f"{baseurl}/fetch-user-data?token={token}"
         response = requests.get(url)
-        print("Response: ", response)
 
         if response is None:
             print("Error: Failed to fetch user data. Please check your internet connection or try again later.")
             return
 
-        print(f"Response Status Code: {response.status_code}")
-        print(f"Response Text: {response.text}")
-
         if response.status_code == 200:
             # Parse the JSON response
             data = response.json()
 
-            # Check if data is empty
+            # Check if the response contains a "message" indicating no data
+            if isinstance(data, dict) and data.get("message") == "No data available for this user.":
+                print("No data available for this user.")
+                return
+
+            # If data is empty
             if not data:
                 print("No data available for this user.")
                 return
@@ -185,8 +174,13 @@ def fetch_user_data(baseurl, token):
                 budget = item.get("BudgetAmount", 0)
                 print(f"- {category}: Spent {total_amount}, Budget {budget}")
 
-            # Call visualization function if data is present
-            visualize_and_save_user_data(data)
+            # Ask the user if they want to visualize the data
+            user_input = input("Would you like to visualize the data? (yes/no): ").strip().lower()
+            if user_input == "yes":
+                visualize_and_save_user_data(data)
+                print("Visualization saved successfully!")
+            else:
+                print("Skipping visualization.")
         else:
             print(f"Error: {response.status_code}")
             if response.headers.get("Content-Type") == "application/json":
